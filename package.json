@@ -13,7 +13,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:open-wrangler.open",
     "onCommand:open-wrangler.openFromCell",
     "onNotebook:*"
   ],
@@ -21,17 +20,12 @@
   "contributes": {
     "commands": [
       {
-        "command": "open-wrangler.open",
-        "title": "Open-Wrangler: Open",
-        "category": "Open-Wrangler"
-      },
-      {
         "command": "open-wrangler.openFromCell",
         "title": "Open-Wrangler: Open DataFrame from Cell",
         "category": "Open-Wrangler"
       }
     ],
-    "notebookCellStatusBar": [
+    "notebookCellStatusBarItem": [
       {
         "viewType": "jupyter-notebook",
         "alignment": "left",

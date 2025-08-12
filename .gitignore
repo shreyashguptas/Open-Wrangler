@@ -9,3 +9,6 @@ node_modules
 .env.development
 .env.test
 .env.production
+
+
+testing-extension/
