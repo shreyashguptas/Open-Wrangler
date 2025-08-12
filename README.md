@@ -67,6 +67,7 @@ See the living feature checklist in `docs/feature-parity.md`.
 ## Documentation
 - Architecture: `docs/architecture.md`
 - Feature parity checklist: `docs/feature-parity.md`
+- Development guide (structure and where to add features): `docs/development.md`
 
 ---
 Copyright (c) The Open‑Wrangler Authors. MIT License.

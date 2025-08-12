@@ -32,6 +32,8 @@ Code generation
 - Export Pandas code first; design exporter so equivalent Polars and DuckDB SQL emitters can be added
 
 Benchmarks and safeguards
+
+See `docs/development.md` for the detailed source structure and guidance on where to add new features.
 - Maintain simple scenarios (open, filter, sort, groupby) to compare engines on 1–50 GB datasets
 - Detect when data exceeds memory and recommend/auto‑switch to a better engine
 
