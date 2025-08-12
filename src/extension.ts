@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('No DataFrame-like output found in the active cell.');
         return;
       }
-      await openTableWebview(table.title, table.rows);
+      await openTableWebview(table.title, table.rows, table.rowCount, table.colCount);
     })
   );
 
@@ -37,7 +37,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-async function openTableWebview(title: string, rows: unknown[][]): Promise<void> {
+async function openTableWebview(
+  title: string,
+  rows: unknown[][],
+  rowCount?: number,
+  colCount?: number
+): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     'openWranglerPreview',
     `Open "${title}" in Open‑Wrangler`,
@@ -47,7 +52,7 @@ async function openTableWebview(title: string, rows: unknown[][]): Promise<void>
 
   const script = getWebviewScript();
   const styles = getWebviewStyles();
-  const payload = JSON.stringify({ title, rows });
+  const payload = JSON.stringify({ title, rows, rowCount, colCount });
   panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -66,7 +71,9 @@ async function openTableWebview(title: string, rows: unknown[][]): Promise<void>
 </body>
 </html>`;
 
-  log.appendLine(`[webview] opened preview for title="${title}" rows=${rows.length}`);
+  log.appendLine(
+    `[webview] opened preview for title="${title}" rows=${rows.length} reportedRowCount=${rowCount ?? 'n/a'} reportedColCount=${colCount ?? 'n/a'}`
+  );
 }
 
 function getWebviewStyles(): string {
@@ -94,8 +101,9 @@ function getWebviewScript(): string {
   const root = document.getElementById('app');
   const header = bootstrap.rows[0] || [];
   const body = bootstrap.rows.slice(1);
-  const totalRows = body.length;
-  const totalCols = header.length;
+  const dataRows = body.length; // rows actually materialized in the payload
+  const reportedRows = Number.isFinite(Number(bootstrap.rowCount)) ? Number(bootstrap.rowCount) : dataRows;
+  const totalCols = Number.isFinite(Number(bootstrap.colCount)) ? Number(bootstrap.colCount) : header.length;
   let pageSize = 10;
   let pageIndex = 0; // zero-based
 
@@ -109,13 +117,13 @@ function getWebviewScript(): string {
   function renderHeader() {
     return el('div', { class: 'header' },
       el('span', { class: 'title' }, 'Open "' + bootstrap.title + '" in Open‑Wrangler'),
-      el('span', { class: 'meta' }, totalRows + ' rows × ' + totalCols + ' cols')
+      el('span', { class: 'meta' }, reportedRows + ' rows × ' + totalCols + ' cols')
     );
   }
 
   function renderTable() {
     const start = pageIndex * pageSize;
-    const end = Math.min(start + pageSize, totalRows);
+    const end = Math.min(start + pageSize, dataRows);
     const pageRows = body.slice(start, end);
     const thead = el('thead');
     const thr = el('tr');
@@ -132,7 +140,7 @@ function getWebviewScript(): string {
   }
 
   function renderPager() {
-    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const totalPages = Math.max(1, Math.ceil(dataRows / pageSize));
     const info = el('span', {}, 'Page ' + (pageIndex + 1) + ' of ' + totalPages);
     const prev = el('button', { id: 'prev', disabled: pageIndex === 0 ? 'true' : '' }, '‹');
     const next = el('button', { id: 'next', disabled: pageIndex + 1 >= totalPages ? 'true' : '' }, '›');
@@ -144,7 +152,7 @@ function getWebviewScript(): string {
     const label = el('span', {}, 'per page');
     const pager = el('div', { class: 'pager' }, prev, next, info, size, label);
     prev.onclick = () => { if (pageIndex > 0) { pageIndex--; update(); } };
-    next.onclick = () => { const t = Math.ceil(totalRows / pageSize); if (pageIndex + 1 < t) { pageIndex++; update(); } };
+    next.onclick = () => { const t = Math.ceil(dataRows / pageSize); if (pageIndex + 1 < t) { pageIndex++; update(); } };
     size.onchange = () => { pageSize = parseInt(size.value, 10); pageIndex = 0; update(); };
     return pager;
   }
@@ -156,7 +164,7 @@ function getWebviewScript(): string {
   `;
 }
 
-type TablePreview = { title: string; rows: unknown[][] } | undefined;
+type TablePreview = { title: string; rows: unknown[][]; rowCount?: number; colCount?: number } | undefined;
 
 async function resolveActiveCellTable(): Promise<TablePreview> {
   const editor = vscode.window.activeNotebookEditor;
@@ -173,11 +181,11 @@ async function resolveActiveCellTable(): Promise<TablePreview> {
       try {
         if (mime === 'application/vnd.dataresource+json') {
           const json = JSON.parse(new TextDecoder().decode(item.data));
-          const rows = toRowsFromDataResource(json);
-          if (rows) {
+          const parsed = toRowsFromDataResource(json);
+          if (parsed) {
             const label = json?.schema?.name || guessLastExpressionVariableName(cell.document.getText()) || 'Data';
-            log.appendLine(`[resolve] parsed dataresource rows=${rows.length}`);
-            return { title: label, rows };
+            log.appendLine(`[resolve] parsed dataresource rows=${parsed.rows.length} counts rowCount=${parsed.rowCount ?? 'n/a'} colCount=${parsed.colCount ?? 'n/a'}`);
+            return { title: label, rows: parsed.rows, rowCount: parsed.rowCount, colCount: parsed.colCount };
           }
         }
         if (mime === 'text/html') {
@@ -185,8 +193,8 @@ async function resolveActiveCellTable(): Promise<TablePreview> {
           const parsed = parseHtmlTable(html);
           if (parsed) {
             const label = guessLastExpressionVariableName(cell.document.getText()) ?? 'Cell HTML table';
-            log.appendLine(`[resolve] parsed text/html rows=${parsed.length}`);
-            return { title: label, rows: parsed };
+            log.appendLine(`[resolve] parsed text/html rows=${parsed.rows.length} counts rowCount=${parsed.rowCount ?? 'n/a'} colCount=${parsed.colCount ?? 'n/a'}`);
+            return { title: label, rows: parsed.rows, rowCount: parsed.rowCount, colCount: parsed.colCount };
           }
         }
         if (mime === 'text/plain') {
@@ -194,8 +202,8 @@ async function resolveActiveCellTable(): Promise<TablePreview> {
           const parsed = parsePlainTextTable(text);
           if (parsed) {
             const label = guessLastExpressionVariableName(cell.document.getText()) ?? 'Cell output';
-            log.appendLine(`[resolve] parsed text/plain rows=${parsed.length}`);
-            return { title: label, rows: parsed };
+            log.appendLine(`[resolve] parsed text/plain rows=${parsed.rows.length} counts rowCount=${parsed.rowCount ?? 'n/a'} colCount=${parsed.colCount ?? 'n/a'}`);
+            return { title: label, rows: parsed.rows, rowCount: parsed.rowCount, colCount: parsed.colCount };
           }
         }
       } catch {
@@ -206,16 +214,22 @@ async function resolveActiveCellTable(): Promise<TablePreview> {
   return undefined;
 }
 
-function toRowsFromDataResource(resource: any): unknown[][] | undefined {
+type ParsedTable = { rows: unknown[][]; rowCount?: number; colCount?: number } | undefined;
+
+function toRowsFromDataResource(resource: any): ParsedTable {
   const fields: string[] = resource?.schema?.fields?.map((f: any) => f?.name) ?? [];
   const data: any[] = resource?.data ?? [];
   if (fields.length === 0 || data.length === 0) return undefined;
   const header = fields;
   const body = data.map(row => header.map(h => row[h]));
-  return normalizeRowsRemoveIndex([header, ...body]);
+  const normalized = normalizeRowsRemoveIndex([header, ...body]);
+  // Attempt to read accurate counts if provided by producer
+  const providedRowCount = resource?.rowCount ?? resource?.count ?? resource?.schema?.dimensions?.rowCount;
+  const providedColCount = resource?.colCount ?? resource?.schema?.dimensions?.columnCount ?? fields.length;
+  return { rows: normalized, rowCount: providedRowCount, colCount: providedColCount };
 }
 
-function parsePlainTextTable(text: string): unknown[][] | undefined {
+function parsePlainTextTable(text: string): ParsedTable {
   // Naive Pandas text repr parsing; prefer HTML/JSON. Only use top rows (head) and ignore tail/ellipsis.
   const rawLines = text.split(/\r?\n/);
   const lines = rawLines.filter(l => l.trim().length > 0);
@@ -230,10 +244,24 @@ function parsePlainTextTable(text: string): unknown[][] | undefined {
     if (dataLines.length >= 2000) break; // guardrail
   }
   const rows = dataLines.map(l => l.split(/\s{2,}|\t|,\s?/).slice(0, header.length));
-  return normalizeRowsRemoveIndex([header, ...rows]);
+  // Parse trailing summary like "[300 rows x 4 columns]" if present
+  let rowCount: number | undefined;
+  let colCount: number | undefined;
+  const summaryMatch = text.match(/\[\s*([0-9,]+)\s*rows?\s*[×x]\s*([0-9,]+)\s*columns?\s*\]/i);
+  if (summaryMatch) {
+    rowCount = Number(summaryMatch[1].replace(/,/g, ''));
+    colCount = Number(summaryMatch[2].replace(/,/g, ''));
+  }
+  const normalized = normalizeRowsRemoveIndex([header, ...rows]);
+  // If we removed an index column, adjust colCount
+  if (colCount !== undefined && normalized[0]?.length !== header.length) {
+    const delta = header.length - normalized[0].length;
+    if (delta === 1) colCount = Math.max(0, colCount - 1);
+  }
+  return { rows: normalized, rowCount, colCount };
 }
 
-function parseHtmlTable(html: string): unknown[][] | undefined {
+function parseHtmlTable(html: string): ParsedTable {
   // We cannot use DOM in extension host; do a minimal regex-based parse for <table><tr><td>... demo
   const tableMatch = html.match(/<table[\s\S]*?<\/table>/i);
   if (!tableMatch) return undefined;
@@ -247,9 +275,29 @@ function parseHtmlTable(html: string): unknown[][] | undefined {
   // Ensure header row exists
   if (rows.length === 1) {
     const header = rows[0].map((_, i) => `col${i + 1}`);
-    return normalizeRowsRemoveIndex([header, rows[0]]);
+    const normalizedSingle = normalizeRowsRemoveIndex([header, rows[0]]);
+    // Try parse counts from surrounding HTML
+    const counts = parseCountsFromHtml(html);
+    return { rows: normalizedSingle, rowCount: counts.rowCount, colCount: counts.colCount };
   }
-  return normalizeRowsRemoveIndex(rows);
+  const normalized = normalizeRowsRemoveIndex(rows);
+  const counts = parseCountsFromHtml(html);
+  // If we removed index, align column count
+  if (counts.colCount !== undefined && normalized[0]?.length < (rows[0]?.length ?? normalized[0]?.length)) {
+    const delta = (rows[0]?.length ?? 0) - normalized[0].length;
+    if (delta === 1) counts.colCount = Math.max(0, counts.colCount - 1);
+  }
+  return { rows: normalized, rowCount: counts.rowCount, colCount: counts.colCount };
+}
+
+function parseCountsFromHtml(html: string): { rowCount?: number; colCount?: number } {
+  // Pandas usually renders a trailing <p> like: "300 rows × 4 columns"
+  const match = html.match(/([0-9][0-9,]*)\s*rows?\s*[×x]\s*([0-9][0-9,]*)\s*(?:cols?|columns?)/i);
+  if (!match) return {};
+  return {
+    rowCount: Number(match[1].replace(/,/g, '')),
+    colCount: Number(match[2].replace(/,/g, ''))
+  };
 }
 
 function guessLastExpressionVariableName(source: string): string | undefined {
