@@ -1,10 +1,14 @@
 # Feature checklist
 
 Launch & sources
-- [ ] Launch from Notebook DataFrame
+- [x] Launch from Notebook DataFrame (basic) — open from Jupyter cell via status bar or command; detects DataFrame‑like outputs (Data Resource JSON, HTML table, plain text fallback)
 - [ ] Launch from file (CSV/TSV, Excel, Parquet)
 
 Viewing
+- [x] Paginated preview grid (10/25/50 per page with paging controls)
+- [x] Accurate row/column counts; auto‑hide Pandas implicit index
+- [x] Dynamic title: “Open '<var>' in Open‑Wrangler” using best‑effort variable‑name detection
+- [x] Output parsing: prefer `application/vnd.dataresource+json`, then HTML table, then plain‑text fallback
 - [ ] Virtualized data grid
 - [ ] Column summaries and quick insights
 - [ ] Sort & filter

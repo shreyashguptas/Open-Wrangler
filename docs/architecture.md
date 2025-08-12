@@ -2,20 +2,19 @@
 
 High‑level components
 - Extension Host (TypeScript): registers commands, contributes views/menus, coordinates with Python, and manages workspace operations
-- Webview UI (React or similar): data grid, operations panel, step history, diff view, code preview
+- Webview UI (vanilla TS for now): interactive, paginated preview grid rendered inside a WebviewPanel; future move to React
 - Python runtime (Pandas): executes data operations in a sandboxed process; returns sampled/summary data and code snippets
 
 Key flows
 1. Launch
-   - From a Notebook variable (DataFrame) via Notebook/Jupyter APIs
-   - From a file in Explorer via a command
+   - From a Notebook variable (DataFrame) via Notebook/Jupyter APIs. We detect DataFrame‑like outputs by inspecting cell output MIME items in priority order: `application/vnd.dataresource+json` → `text/html` → `text/plain`.
+   - From a file in Explorer via a command (planned)
 2. Data session lifecycle
-   - Load → profile → render grid with virtualization
-   - Apply operation → generate Pandas code → preview diff → update step list
-   - Export code back to notebook or save transformed data
+   - Preview: render a paginated grid (10/25/50 per page). We compute accurate row/column counts and remove Pandas implicit index from the grid header.
+   - Future: profile → virtualized grid → operations with step history → code generation
 3. IPC
-   - Webview ↔ Extension Host: `postMessage` protocol with typed payloads
-   - Extension Host ↔ Python: JSON‑RPC over stdio or Node child process, with cancellation tokens
+   - Webview ↔ Extension Host: not used yet; initial grid is bootstrapped as static payload in the HTML. Will evolve to a `postMessage` protocol with typed payloads for operations.
+   - Extension Host ↔ Python: planned (JSON‑RPC over stdio or Node child process, with cancellation tokens)
 
 Security and performance
 - No arbitrary code execution from the webview
