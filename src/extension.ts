@@ -92,6 +92,15 @@ function getWebviewStyles(): string {
   button { background: #3a3a3a; color: var(--fg); border: 1px solid #444; padding: 2px 8px; border-radius: 3px; cursor: pointer; }
   button[disabled] { opacity: 0.5; cursor: default; }
   select { background: #2a2a2a; color: var(--fg); border: 1px solid #444; padding: 2px 6px; }
+  .ow-menu { position: fixed; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; min-width: 160px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); z-index: 1000; }
+  .ow-menu .item { padding: 6px 10px; cursor: pointer; }
+  .ow-menu .item:hover { background: #3a3a3a; }
+  .th-sorted { color: var(--accent); }
+  .th-container { display: flex; align-items: center; gap: 6px; }
+  .th-label { flex: 1; }
+  .th-menu-button { visibility: hidden; background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 0 4px; border-radius: 3px; }
+  th:hover .th-menu-button { visibility: visible; }
+  .th-menu-button:hover { background: #3a3a3a; color: var(--fg); }
   `;
 }
 
@@ -100,12 +109,15 @@ function getWebviewScript(): string {
   return `
   const root = document.getElementById('app');
   const header = bootstrap.rows[0] || [];
-  const body = bootstrap.rows.slice(1);
-  const dataRows = body.length; // rows actually materialized in the payload
+  const rawBody = bootstrap.rows.slice(1);
+  let body = rawBody.slice();
+  let dataRows = body.length; // rows actually materialized in the payload
   const reportedRows = Number.isFinite(Number(bootstrap.rowCount)) ? Number(bootstrap.rowCount) : dataRows;
   const totalCols = Number.isFinite(Number(bootstrap.colCount)) ? Number(bootstrap.colCount) : header.length;
   let pageSize = 10;
   let pageIndex = 0; // zero-based
+  let sortCol = -1; // none
+  let sortDir = null; // 'asc' | 'desc' | null
 
   function el(tag, attrs = {}, ...children) {
     const n = document.createElement(tag);
@@ -127,7 +139,18 @@ function getWebviewScript(): string {
     const pageRows = body.slice(start, end);
     const thead = el('thead');
     const thr = el('tr');
-    header.forEach(h => thr.append(el('th', {}, h)));
+    header.forEach((h, i) => {
+      const isSorted = i === sortCol && !!sortDir;
+      const labelText = isSorted ? (h + ' ' + (sortDir === 'asc' ? '▲' : '▼')) : h;
+      const th = el('th', { 'data-col': String(i) });
+      const btn = el('button', { class: 'th-menu-button', title: 'Column options' }, '⋯');
+      btn.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openMenuFor(th, i); };
+      th.oncontextmenu = (ev) => { ev.preventDefault(); openMenuFor(th, i); };
+      const label = el('span', { class: 'th-label' }, labelText);
+      if (isSorted) label.classList.add('th-sorted');
+      th.append(el('div', { class: 'th-container' }, label, btn));
+      thr.append(th);
+    });
     thead.append(thr);
     const tbody = el('tbody');
     pageRows.forEach(r => {
@@ -155,6 +178,93 @@ function getWebviewScript(): string {
     next.onclick = () => { const t = Math.ceil(dataRows / pageSize); if (pageIndex + 1 < t) { pageIndex++; update(); } };
     size.onchange = () => { pageSize = parseInt(size.value, 10); pageIndex = 0; update(); };
     return pager;
+  }
+
+  function openMenuFor(thEl, colIndex) {
+    // Measure to position below the header cell; align to right like a 3-dot menu
+    const rect = thEl.getBoundingClientRect();
+    const x = rect.right - 8;
+    const y = rect.bottom + 4;
+    showMenuAt(x, y, colIndex);
+  }
+
+  function showMenuAt(x, y, colIndex) {
+    hideMenu();
+    const menu = el('div', { class: 'ow-menu', id: 'ow-menu' });
+    const isSortedAsc = sortCol === colIndex && sortDir === 'asc';
+    const isSortedDesc = sortCol === colIndex && sortDir === 'desc';
+    const asc = el('div', { class: 'item' }, isSortedAsc ? '✓ Sort ascending' : 'Sort ascending');
+    const desc = el('div', { class: 'item' }, isSortedDesc ? '✓ Sort descending' : 'Sort descending');
+    const clear = el('div', { class: 'item' }, 'Clear sort');
+    asc.onclick = () => { sortBy(colIndex, 'asc'); };
+    desc.onclick = () => { sortBy(colIndex, 'desc'); };
+    clear.onclick = () => { clearSort(); };
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.append(asc, desc, clear);
+    document.body.append(menu);
+    const dismiss = (ev) => {
+      const m = document.getElementById('ow-menu');
+      if (!m) return;
+      if (!m.contains(ev.target)) hideMenu();
+    };
+    setTimeout(() => {
+      document.addEventListener('click', dismiss);
+      document.addEventListener('contextmenu', dismiss);
+      document.addEventListener('scroll', hideMenu, { capture: true });
+      window.addEventListener('resize', hideMenu);
+    }, 0);
+  }
+
+  function hideMenu() {
+    const existing = document.getElementById('ow-menu');
+    if (existing) existing.remove();
+    document.removeEventListener('scroll', hideMenu, { capture: true });
+    window.removeEventListener('resize', hideMenu);
+  }
+
+  function sortBy(colIndex, direction) {
+    sortCol = colIndex;
+    sortDir = direction;
+    const numeric = isColumnNumeric(colIndex);
+    const factor = direction === 'asc' ? 1 : -1;
+    body = rawBody.slice().sort((a, b) => compareValues(a[colIndex], b[colIndex], numeric) * factor);
+    dataRows = body.length;
+    pageIndex = 0;
+    hideMenu();
+    update();
+  }
+
+  function clearSort() {
+    sortCol = -1;
+    sortDir = null;
+    body = rawBody.slice();
+    dataRows = body.length;
+    pageIndex = 0;
+    hideMenu();
+    update();
+  }
+
+  function isColumnNumeric(colIndex) {
+    const sample = rawBody.slice(0, Math.min(100, rawBody.length)).map(r => r[colIndex]);
+    return sample.every(v => v === null || v === '' || v === undefined || !Number.isNaN(Number(v)));
+  }
+
+  function compareValues(a, b, numeric) {
+    const aMissing = a === undefined || a === null || a === '';
+    const bMissing = b === undefined || b === null || b === '';
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1; // missing last
+    if (bMissing) return -1;
+    if (numeric) {
+      const na = Number(a);
+      const nb = Number(b);
+      if (!Number.isFinite(na) && !Number.isFinite(nb)) return 0;
+      if (!Number.isFinite(na)) return 1;
+      if (!Number.isFinite(nb)) return -1;
+      return na - nb;
+    }
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
   }
 
   function update() {
