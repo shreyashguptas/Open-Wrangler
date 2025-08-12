@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "publisher": "openwrangler",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shreyashguptas/Open-Wrangler"
+  },
   "engines": {
     "vscode": "^1.84.0"
   },
